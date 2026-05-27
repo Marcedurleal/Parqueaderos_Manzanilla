@@ -1,39 +1,38 @@
-
 import streamlit as st
 import pandas as pd
 import random
 import time
+import io
 
 st.set_page_config(page_title="Sorteo de Parqueaderos", page_icon="🚗", layout="wide")
 
 st.title("🚗 Sistema Digital de Sorteo de Parqueaderos")
 st.markdown("""
-Esta aplicación automatiza la asignación aleatoria y equitativa de parqueaderos a los apartamentos de un conjunto residencial. 
-El proceso cuenta con una animación visible y transparente para asegurar la confianza de todos los copropietarios.
+Esta aplicación automatiza la asignación aleatoria de parqueaderos. 
+**Nueva Lógica:** Al haber más apartamentos que parqueaderos, el sistema seleccionará aleatoriamente quiénes obtienen parqueadero y quiénes quedan en lista de espera.
 """)
 
 # Sección de Carga de Archivos
 st.sidebar.header("📁 Carga de Datos")
 uploaded_file = st.sidebar.file_uploader("Carga tu archivo Excel (.xlsx)", type=["xlsx"])
 
-# Datos de ejemplo por si el usuario no tiene un archivo a la mano
+# Datos de ejemplo para simulación
 def cargar_datos_ejemplo():
-    parqueaderos = [f"P-{i:03d}" for i in range(1, 31)]
-    apartamentos = [f"Torre {t} - Apt {a:03d}" for t in range(1, 4) for a in range(101, 111)]
+    parqueaderos = [f"P-{i:03d}" for i in range(1, 16)] # 15 parqueaderos
+    apartamentos = [f"Torre {t} - Apt {a:03d}" for t in range(1, 4) for a in range(101, 109)] # 24 apartamentos
     df_pq = pd.DataFrame({"Parqueadero": parqueaderos})
     df_ap = pd.DataFrame({"Apartamento": apartamentos})
     return df_pq, df_ap
 
 if not uploaded_file:
-    st.info("💡 Por favor, carga un archivo Excel en la barra lateral. Mientras tanto, puedes previsualizar el sistema con **datos de ejemplo generados automáticamente**.")
-    if st.checkbox("Usar datos de simulación/ejemplo"):
+    st.info("💡 Por favor, carga un archivo Excel en la barra lateral o usa los datos de simulación para probar el sistema.")
+    if st.checkbox("Usar datos de simulación/ejemplo con más apartamentos que parqueaderos"):
         df_pq, df_ap = cargar_datos_ejemplo()
-        st.success("¡Datos de simulación cargados con éxito!")
+        st.success("¡Datos de simulación cargados!")
     else:
         st.stop()
 else:
     try:
-        # Intentar leer las hojas especificadas por el usuario
         xl = pd.ExcelFile(uploaded_file)
         hojas = xl.sheet_names
         
@@ -52,30 +51,32 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("📋 Parqueaderos Disponibles")
-    col_pq = st.selectbox("Selecciona la columna de Parqueaderos", df_pq.columns)
+    col_pq = st.selectbox("Columna de Parqueaderos", df_pq.columns)
     lista_parqueaderos = df_pq[col_pq].dropna().astype(str).tolist()
-    st.write(f"Total parqueaderos detectados: **{len(lista_parqueaderos)}**")
-    st.dataframe(df_pq[[col_pq]], height=200, use_container_width=True)
+    st.write(f"Total parqueaderos: **{len(lista_parqueaderos)}**")
+    st.dataframe(df_pq[[col_pq]], height=150, use_container_width=True)
 
 with col2:
     st.subheader("🏢 Apartamentos Participantes")
-    col_ap = st.selectbox("Selecciona la columna de Apartamentos", df_ap.columns)
+    col_ap = st.selectbox("Columna de Apartamentos", df_ap.columns)
     lista_apartamentos = df_ap[col_ap].dropna().astype(str).tolist()
-    st.write(f"Total apartamentos detectados: **{len(lista_apartamentos)}**")
-    st.dataframe(df_ap[[col_ap]], height=200, use_container_width=True)
+    st.write(f"Total apartamentos: **{len(lista_apartamentos)}**")
+    st.dataframe(df_ap[[col_ap]], height=150, use_container_width=True)
 
-# Validaciones críticas antes del sorteo
 if len(lista_parqueaderos) == 0 or len(lista_apartamentos) == 0:
     st.warning("⚠️ Asegúrate de que ambas listas tengan datos válidos.")
     st.stop()
 
-if len(lista_parqueaderos) < len(lista_apartamentos):
-    st.error(f"🚨 Alerta: Hay más apartamentos ({len(lista_apartamentos)}) que parqueaderos disponibles ({len(lista_parqueaderos)}). Faltan {len(lista_apartamentos) - len(lista_parqueaderos)} parqueaderos.")
-    st.stop()
-
-# Configuración del Sorteo
+# Informar la situación del sorteo
 st.markdown("---")
 st.subheader("⚙️ Configuración del Sorteo Visual")
+
+if len(lista_apartamentos) > len(lista_parqueaderos):
+    dif = len(lista_apartamentos) - len(lista_parqueaderos)
+    st.warning(f"📢 **Nota del Sorteo:** Hay más apartamentos ({len(lista_apartamentos)}) que parqueaderos ({len(lista_parqueaderos)}). Al finalizar, **{dif}** apartamentos quedarán en lista de espera.")
+else:
+    st.info("Nota: Hay suficientes parqueaderos para todos los apartamentos.")
+
 velocidad = st.slider("Velocidad de la animación (segundos por asignación)", min_value=0.05, max_value=1.5, value=0.3, step=0.05)
 
 # Inicializar estados de la sesión
@@ -88,47 +89,48 @@ if "resultados_df" not in st.session_state:
 if st.button("🚀 INICIAR SORTEO PÚBLICO", type="primary"):
     st.session_state.sorteo_realizado = False
     
-    # Copias para mezclar de manera segura
+    # 1. Mezclar completamente la lista de apartamentos para asegurar aleatoriedad total
     ap_mezclados = lista_apartamentos.copy()
-    pq_disponibles = lista_parqueaderos.copy()
-    
-    # Mezclamos los apartamentos de forma totalmente aleatoria
     random.shuffle(ap_mezclados)
-    # Mezclamos también los parqueaderos para doble aleatoriedad
+    
+    # 2. Mezclar los parqueaderos disponibles
+    pq_disponibles = lista_parqueaderos.copy()
     random.shuffle(pq_disponibles)
     
-    # Contenedor de la animación activa
+    # 3. Separar los apartamentos que alcanzan parqueadero y los que van a lista de espera
+    cant_parqueaderos = len(pq_disponibles)
+    ap_con_parqueadero = ap_mezclados[:cant_parqueaderos]
+    ap_sin_parqueadero = ap_mezclados[cant_parqueaderos:]
+    
+    # Contenedores para la animación
     st.subheader("🔮 Proceso de Asignación en Tiempo Real")
     progreso_bar = st.progress(0)
     status_text = st.empty()
-    
-    # Cuadro visual grande de asignación de impacto
     pantalla_animacion = st.empty()
-    
-    # Tabla en vivo que se irá llenando
     tabla_en_vivo = st.empty()
     
     resultados_lista = []
-    total_sorteos = len(ap_mezclados)
+    total_sorteos = len(ap_con_parqueadero)
     
-    for i, apto in enumerate(ap_mezclados):
+    # 4. Sorteo Visual (Solo para los que ganaron parqueadero)
+    for i, apto in enumerate(ap_con_parqueadero):
         pq_asignado = pq_disponibles[i]
         
-        # Efecto visual de "Ruleta" antes de fijar el resultado (simulación de giro rápido)
-        for _ in range(5):
+        # Animación de ruleta
+        for _ in range(6):
             opcion_aleatoria = random.choice(pq_disponibles[i:])
             pantalla_animacion.markdown(f"""
             <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; border: 2px dashed #31333F;">
-                <h3 style="margin: 0; color: #555;">Sorteando Parqueadero para: <b>{apto}</b></h3>
+                <h3 style="margin: 0; color: #555;">Buscando parqueadero para: <b>{apto}</b></h3>
                 <h1 style="margin: 10px 0; color: #ff4b4b; font-size: 40px;">🔄 {opcion_aleatoria}</h1>
             </div>
             """, unsafe_allow_html=True)
-            time.sleep(0.03)
+            time.sleep(0.04)
             
-        # Fijar la asignación real
+        # Guardar resultado real
         resultados_lista.append({"Apartamento": apto, "Parqueadero Asignado": pq_asignado})
         
-        # Mostrar el resultado fijado en grande
+        # Mostrar resultado fijo en pantalla
         pantalla_animacion.markdown(f"""
         <div style="background-color: #d4edda; padding: 20px; border-radius: 10px; text-align: center; border: 2px solid #28a745;">
             <h3 style="margin: 0; color: #155724;">¡ASIGNADO!</h3>
@@ -137,51 +139,53 @@ if st.button("🚀 INICIAR SORTEO PÚBLICO", type="primary"):
         </div>
         """, unsafe_allow_html=True)
         
-        # Actualizar progreso
+        # Actualizar progreso en la pantalla
         porcentaje = int((i + 1) / total_sorteos * 100)
         progreso_bar.progress(porcentaje)
-        status_text.markdown(f"Asignando: **{i+1}** de **{total_sorteos}** apartamentos.")
+        status_text.markdown(f"Asignados de forma visible: **{i+1}** de **{total_sorteos}** parqueaderos.")
         
-        # Actualizar tabla resumida en vivo
+        # Mostrar los últimos resultados en una tabla pequeña
         df_actual = pd.DataFrame(resultados_lista)
-        tabla_en_vivo.dataframe(df_actual.tail(5), use_container_width=True) # Muestra los últimos 5 asignados
+        tabla_en_vivo.dataframe(df_actual.tail(5), use_container_width=True)
         
         time.sleep(velocidad)
         
-    # Limpiar pantalla de animación y dar mensaje de éxito total
+    # 5. Agregar automáticamente los apartamentos que se quedaron sin parqueadero al reporte
+    for apto in ap_sin_parqueadero:
+        resultados_lista.append({"Apartamento": apto, "Parqueadero Asignado": "Sin Parqueadero Asignado (Lista de espera)"})
+        
     pantalla_animacion.empty()
     st.balloons()
-    st.success("🎉 ¡El sorteo ha finalizado con éxito! Todos los apartamentos tienen un parqueadero asignado.")
+    st.success("🎉 ¡El sorteo ha finalizado! Se han asignado todos los estacionamientos disponibles.")
     
-    # Guardar en el estado para mantener el resultado visible si interactúan con algo más
+    # Guardar en el estado de Streamlit
     st.session_state.resultados_df = pd.DataFrame(resultados_lista)
     st.session_state.sorteo_realizado = True
 
-# Mostrar Resultados Finales y Descarga si ya concluyó el sorteo
+# Mostrar Resultados Finales y Descarga de Excel
 if st.session_state.sorteo_realizado and st.session_state.resultados_df is not None:
     st.markdown("---")
-    st.subheader("🏆 Resultados Finales del Sorteo")
+    st.subheader("🏆 Resultados Oficiales del Sorteo")
     
     res_df = st.session_state.resultados_df
     
-    # Buscador para que los vecinos revisen su apartamento de inmediato
-    buscar_apto = st.text_input("🔍 Buscar mi apartamento en la lista de ganadores:")
+    # Buscador interactivo para los copropietarios
+    buscar_apto = st.text_input("🔍 Buscar mi apartamento (ej: Torre 1):")
     if buscar_apto:
         df_filtrado = res_df[res_df['Apartamento'].str.contains(buscar_apto, case=False, na=False)]
         st.dataframe(df_filtrado, use_container_width=True)
     else:
         st.dataframe(res_df, use_container_width=True)
         
-    # Convertir a Excel en memoria para la descarga
-    import io
+    # Generar el archivo Excel descargable con openpyxl
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        res_df.to_excel(writer, index=False, sheet_name='Resultado_Sorteo')
+        res_df.to_excel(writer, index=False, sheet_name='Resultados_Sorteo')
     processed_data = output.getvalue()
     
     st.download_button(
-        label="📥 Descargar Resultados en Excel",
+        label="📥 Descargar Acta de Resultados en Excel",
         data=processed_data,
-        file_name="resultados_sorteo_parqueaderos.xlsx",
+        file_name="acta_sorteo_parqueaderos.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
